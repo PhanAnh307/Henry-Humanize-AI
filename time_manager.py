@@ -14,13 +14,13 @@ class TimeManager:
     def switch_online(self):
         self.is_online = True
         print("[Time Manager] Henry đang online...")
-        self.timer = threading.Timer(60, self.switch_offline)  # 15 phút
+        self.timer = threading.Timer(600, self.switch_offline)  # 15 phút
         self.timer.start()
 
     def switch_offline(self):
         self.is_online = False
         print("[Time Manager] Henry đang offline...")
-        self.timer = threading.Timer(30, self.switch_online)  # 30 phút
+        self.timer = threading.Timer(65, self.switch_online)  # 30 phút
         self.timer.start()
 
     def reset_timer(self):
@@ -33,4 +33,4 @@ class TimeManager:
 
     def check_offline_duration(self):
         offline_duration = datetime.now() - self.last_activity_time
-        return offline_duration > timedelta(hours=2)
+        return offline_duration > timedelta(hours=0.1)

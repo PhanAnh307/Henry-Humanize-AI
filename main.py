@@ -8,6 +8,7 @@ from groq import Groq
 import json
 from datetime import datetime
 import time
+import asyncio
 import sys
 from time_manager import TimeManager  # Import TimeManager
 from database import Database  # Import Database
@@ -46,7 +47,7 @@ client = Groq(api_key=api_key)
 model = SentenceTransformer('all-MiniLM-L6-v2')
 # --- SETUP INSIDE AI ---
 
-groq_client = "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"  # Sử dụng biến môi trường
+groq_client = Groq(api_key="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")  # Sử dụng biến môi trường
 topic_generator = TopicGenerator(groq_client)
 # --- FAISS OPERATIONS ---
 def load_faiss_index(filename):
@@ -243,6 +244,38 @@ You commonly use words like "nah" to express disagreement or "nope" instead of s
 """
     ]
     return " ".join(personality_traits)
+def build_prompt_for_message_classification():
+    return """
+    You are an assistant specialized in identifying important messages for a chatbot named Henry. 
+    Henry is interested in topics like crypto, technology, and trending news. 
+    Messages are important if:
+    - They ask about crypto, blockchain, or AI (e.g., "How does blockchain work?" or "What's new in crypto?")
+    - They discuss or seek opinions about trends in technology or financial markets.
+    - They appear conversational and might engage Henry's character or preferences.
+    
+    Respond with "important" if the message meets the criteria. Otherwise, respond with "not important."
+    """
+def classify_message(content):
+    # Prompt for classification
+    prompt = build_prompt_for_message_classification()
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": content}
+    ]
+    try:
+        # Gửi yêu cầu tới Inside AI
+        completion = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=messages,
+            temperature=0.5,  # Ít sáng tạo hơn
+            max_tokens=5
+        )
+        response = completion.choices[0].message.content.strip().lower()
+        return response == "important"
+    except Exception as e:
+        print(f"Error during classification: {e}")
+        return False
+
 
 def chat_with_ai(user_input, user_id):
     # Retrieve context first, before saving the new input
@@ -320,6 +353,15 @@ async def handle_new_message(event):
         pass
 
 
+async def send_random_topic(group_id):
+    # Sinh chủ đề mới và kiểm tra trùng lặp
+    max_retries = 5
+    for _ in range(max_retries):
+        topic = topic_generator.generate_topic()
+        if not topic_generator.is_topic_used(topic):
+            topic_generator.save_topic(topic)
+            await telegram_client.send_message(group_id, topic)
+            return
 async def process_offline_messages():
     while True:
         await asyncio.sleep(60)  # Kiểm tra mỗi phút
@@ -329,22 +371,19 @@ async def process_offline_messages():
                 offline_messages = db.get_offline_messages(group_id, last_online)
                 
                 if not offline_messages:
-                    # Gửi chủ đề random
-                    topic = "Chào cả nhà! Hôm nay có gì hot không? 🚀"
-                    await telegram_client.send_message(group_id, topic)
+                    # Gọi hàm gửi chủ đề động
+                    await send_random_topic(group_id)
                 else:
                     for msg in offline_messages:
                         user_id, content, msg_id = msg
-                        # Phân loại tin nhắn quan trọng (ví dụ đơn giản)
-                        if "?" in content or "@henry" in content:
+                        # Phân loại tin nhắn quan trọng bằng Inside AI
+                        if classify_message(content):
                             response = chat_with_ai(content, user_id)
                             await telegram_client.send_message(group_id, response, reply_to=msg_id)
                             db.mark_as_processed(msg_id)
+                            print("Đã chọn tin nhắn quan trọng")
                             break
 # --- RUN TELEGRAM CLIENT ---
-# --- Sửa hàm main ---
-import asyncio
-
 async def main():
     print("Bot đang chạy...")
     time_manager.start_cycle()  # Khởi động chu kỳ online/offline

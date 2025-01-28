@@ -24,15 +24,15 @@ class TopicGenerator:
     def generate_topic(self):
         """Sinh chủ đề mới bằng Groq/Llama3."""
         prompt = """
-        Hãy tạo một chủ đề thảo luận ngắn gọn, thú vị về crypto, công nghệ hoặc xu hướng mới nhất.
-        Ví dụ:
-        - "Có ai nghe tin Ethereum sắp nâng cấp chưa? 🚀"
-        - "Mọi người nghĩ sao về Metaverse? 🌐"
+        You are a friendly and active member of a group chat. Write a casual, engaging message to spark conversation. 
+        The message should feel natural and not overly formal. Example topics could include recent tech trends, crypto news, or something funny. 
+        Make sure the message is short and conversational.
         """
         response = self.client.chat.completions.create(
             model="llama3-8b-8192",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7  # Độ sáng tạo
+            temperature=0.7,
+            max_tokens=50
         )
         return response.choices[0].message.content.strip()
 
