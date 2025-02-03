@@ -9,6 +9,7 @@ import json
 from datetime import datetime
 import time
 import asyncio
+import threading
 import sys
 from time_manager import TimeManager  # Import TimeManager
 from database import Database  # Import Database
@@ -326,15 +327,15 @@ async def handle_new_message(event):
     chat_id = event.chat_id
     user_id = event.sender_id
     message_text = event.text
-
+    message_id = event.id
     # Chỉ xử lý tin nhắn từ kênh được phép
     if chat_id not in CHANNEL_WHITELIST:
         return
 
     # --- CẬP NHẬT MỚI: Lưu tin nhắn vào database và reset bộ đếm ---
-    db.add_message(chat_id, user_id, message_text)
-    if not time_manager.is_online:
-        time_manager.reset_timer()
+    db.add_message(message_id, chat_id, user_id, message_text)
+    # Reset bộ đếm chủ đề khi có tin nhắn mới
+    # time_manager.reset_topic_timer()
 
     # --- Logic cũ cho admin ---
     if user_id == ADMIN_USER_ID and message_text.startswith("/teach"):
@@ -347,7 +348,10 @@ async def handle_new_message(event):
     if time_manager.is_online:
         # Xử lý tin nhắn bình thường (giữ nguyên logic cũ)
         response = chat_with_ai(message_text, user_id)
+        db.mark_as_processed(message_id)
+        time_manager.extend_online_time(120)
         await event.reply(response)
+        
     else:
         # Tin nhắn được lưu nhưng Henry không phản hồi ngay
         pass
@@ -364,25 +368,33 @@ async def send_random_topic(group_id):
             return
 async def process_offline_messages():
     while True:
-        await asyncio.sleep(60)  # Kiểm tra mỗi phút
-        if time_manager.check_offline_duration():
-            for group_id in CHANNEL_WHITELIST.keys():
-                last_online = time_manager.last_activity_time
-                offline_messages = db.get_offline_messages(group_id, last_online)
-                
-                if not offline_messages:
-                    # Gọi hàm gửi chủ đề động
-                    await send_random_topic(group_id)
-                else:
-                    for msg in offline_messages:
-                        user_id, content, msg_id = msg
-                        # Phân loại tin nhắn quan trọng bằng Inside AI
-                        if classify_message(content):
-                            response = chat_with_ai(content, user_id)
-                            await telegram_client.send_message(group_id, response, reply_to=msg_id)
+        if time_manager.is_online:          
+            if time_manager.check_offline_duration():
+                print("[DEBUG] Bot đã offline đủ lâu, bắt đầu xử lý tin nhắn offline...")
+
+                for group_id in CHANNEL_WHITELIST.keys():
+                    last_online = time_manager.last_activity_time
+                    offline_messages = db.get_offline_messages(group_id, last_online)
+
+                    if not offline_messages:
+                        print(f"[DEBUG] Không có tin nhắn offline trong nhóm {group_id}. Gửi chủ đề tự động...")
+                        await send_random_topic(group_id)
+                    else:
+                        for msg in offline_messages:
+                            user_id, content, msg_id, timestamp = msg
                             db.mark_as_processed(msg_id)
-                            print("Đã chọn tin nhắn quan trọng")
-                            break
+                            print(f"[DEBUG] Kiểm tra tin nhắn từ User {user_id}: {content}")
+
+                            # Kiểm tra xem tin nhắn có phải là tin nhắn quan trọng hay không
+                            if classify_message(content):
+                                print(f"[INFO] ✅ Tin nhắn từ {user_id} được xác định là quan trọng: {content}")
+                                response = chat_with_ai(content, user_id)
+                                await telegram_client.send_message(group_id, response, reply_to=msg_id)
+                                print(f"[INFO] ✅ Đã trả lời và đánh dấu tin nhắn {msg_id} là đã xử lý.")
+                                break
+                            else:
+                                print(f"[INFO] ❌ Tin nhắn từ {user_id} KHÔNG được xác định là quan trọng: {content}")
+
 # --- RUN TELEGRAM CLIENT ---
 async def main():
     print("Bot đang chạy...")
