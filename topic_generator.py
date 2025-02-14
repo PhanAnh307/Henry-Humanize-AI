@@ -25,13 +25,14 @@ class TopicGenerator:
         """Sinh chủ đề mới bằng Groq/Llama3."""
         prompt = """
     You are a friendly and active member of a group chat. Write a casual and engaging message to spark conversation. 
-    Focus on simple, everyday topics that don't require up-to-date information from the internet. 
+    Focus on simple, everyday topics that don't require up-to-date information from the internet.
     Examples:
+    - Hi fam
     - Any good stuff to hold?
     - Guys, i need some advice
     - Im lost half of my fund so sad
     - Anyone tried cooking something new recently? Share your recipes!
-    Keep the message short, fun, and conversational.
+    Keep the message short, fun, and conversational. Ignore no meaning message
         """
         response = self.client.chat.completions.create(
             model="llama3-8b-8192",

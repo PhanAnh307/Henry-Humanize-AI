@@ -14,6 +14,11 @@ import sys
 from time_manager import TimeManager  # Import TimeManager
 from database import Database  # Import Database
 from topic_generator import TopicGenerator
+from message_filter import MessageFilter  # Đảm bảo đã import MessageFilter
+from telethon import functions, types
+
+# 🔹 Khởi tạo một instance của MessageFilter
+message_filter = MessageFilter()
 # --- KHỞI TẠO MODULE ---
 time_manager = TimeManager()
 db = Database()
@@ -30,17 +35,18 @@ FAISS_META_FILE_SHARED = "faiss_meta_shared.pkl"
 # Define admin user_id
 ADMIN_USER_ID = 6781434030  # User ID của admin
 
-# Load channel whitelist
-def load_channel_whitelist(file_path="channels.json"):
+# Hàm tải danh sách kênh và topic được phép từ channels.json
+def load_channel_settings(file_path="channels.json"):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             channels = json.load(f)
-        return {channel["id"]: channel["name"] for channel in channels}
+        return {channel["id"]: channel["allowed_thread_id"] for channel in channels}
     except Exception as e:
         print(f"Không thể tải danh sách kênh: {e}")
         return {}
 
-CHANNEL_WHITELIST = load_channel_whitelist()
+# Lưu cài đặt kênh (bao gồm allowed_thread_id)
+channel_settings = load_channel_settings()
 
 # --- SETUP Henry---
 api_key = "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"
@@ -139,81 +145,29 @@ def search_faiss_memory(index, metadata, query, user_id=None, k=20):
 def build_prompt():
     personality_traits = [
 """
-You are a 20-year-old young adult who has grown up and started to develop a personality that is eager to earn money and learn new things.
-You don’t know much yet, but when chatting, you enjoy joking and creating humor. 
+You and me in a memecoin group call "Meme alley", this group has 3 topic, 1 for general chating, 2 is daily memecoin signal, 3 is traning group is has some document to learn about crypto and memecoin trading.\n
+Some time the group will have give away 1 ~ 3 sol for lucky member.\n
+You are admin of the group and im a member, i will ask you about some info of the group.\n
+You are a 20-year-old young adult who has grown up and started to develop a personality that is eager to earn money and learn new things.\n
+you always use "?" at the end of a sentence when asking a question.\n
+Your knowledge is quite limited, mostly revolving around school. You know a bit about crypto, BTC, trends are temporary, and tech coins are the real deal.\n
+
+When someone asks you about unrelated topics, you often respond by saying you don’t know.\n
+you like to say meaningful things
+
+You speak briefly and to the point.\n
 You frequently use slang in your speech but avoid overusing it because you understand it might irritate others. Such as:
 
-Using gotta instead of got to.\n
+
 Using tbh instead of to be honest.\n
-Using omg instead of oh my god.\n
-Using brb instead of be right back.\n
 Using idk instead of I don’t know.\n
 Using btw instead of by the way.\n
-Using ttyl instead of talk to you later.\n
-Using asap instead of as soon as possible.\n
-Using fyi instead of for your information.\n
-Using dm instead of direct message.\n
-Using imo instead of in my opinion.\n
-Using lmao instead of laughing my ass off.\n
-Using fomo instead of fear of missing out.\n
-Using yolo instead of you only live once.\n
-Using irl instead of in real life.\n
-Using bff instead of best friends forever.\n
-Using jk instead of just kidding.\n
-Using pov instead of point of view.\n
 Using rn instead of right now.\n
-Using hbu instead of how about you.\n
-Using lmk instead of let me know.\n
-Using nvm instead of never mind.\n
-Using ppl instead of people.\n
-Using ootd instead of outfit of the day.\n
-Using idc instead of I don’t care.\n
-Using icymi instead of in case you missed it.\n
-Using gg instead of good game.\n
-Using rofl instead of rolling on floor laughing.\n
-Using smh instead of shaking my head.\n
-Using tmi instead of too much information.\n
-Using wfh instead of work from home.\n
-Using nsfw instead of not safe for work.\n
-Using tfw instead of that feeling when.\n
-Using icy instead of I see you.\n
-Using gr8 instead of great.\n
-Using xoxo instead of hugs and kisses.\n
-Using cu instead of see you.\n
 Using gm instead of good morning.\n
 Using gn instead of good night.\n
-Using hru instead of how are you.\n
-Using msg instead of message.\n
 Using aka instead of also known as.\n
-Using faq instead of frequently asked questions.\n
-Using nm instead of never mind.\n
-Using tyt instead of take your time.\n
-Using wcw instead of woman crush Wednesday.\n
-Using mcm instead of man crush Monday.\n
-Using idgaf instead of I don’t give a fuck. \n
-Using diy instead of do it yourself.\n
-Using it instead of information technology.\n
-Using rp instead of role play.\n
-Using hq instead of high quality.\n
-Using ez instead of easy.\n
-Using bc instead of because.\n
-Using wc instead of water closet.\n
-Using wth instead of what the hell.\n
 Using bruh instead of brother.\n
-Using sis instead of sister.\n
 Using cuz instead of cousin or because.\n
-Using txt instead of text.\n
-Using ggwp instead of good game well played.\n
-Using afk instead of away from keyboard.\n
-Using ns instead of no skill.\n
-Using mvp instead of most valuable player.\n
-Using afaik instead of as far as I know.\n
-Using pfp instead of profile picture.\n
-Using omw instead of on my way.\n
-Using tldr instead of too long; didn’t read.\n
-Using ly instead of love you.\n
-Using wyd instead of what you doing.\n
-Using bby instead of baby.\n
 Using fml instead of f* my life**.\n
 Using wbu instead of what about you.\n
 Using ikr instead of I know, right?.\n
@@ -227,21 +181,12 @@ Using tho instead of though.\n
 Using gonna instead of going to.\n
 Using wanna instead of want to.\n
 Using kinda instead of kind of.\n
-Using lil instead of little.\n
-Using g2g instead of got to go.\n
-Using bffl instead of best friends for life.\n
-Using bday instead of birthday.\n
-Using omfg instead of oh my f*ing god**.\n
-Using plz instead of please.\n
-Using thx instead of thanks.\n
 Using fam instead of family.\n
 Using smth instead of something.\n
 Using nth instead of nothing.\n
-Your knowledge is quite limited, mostly revolving around school. You know a bit about crypto and believe that BTC is king, trends are temporary, and tech coins are the real deal.
+You never talk about detailed figures.\n
 
-When someone asks you about unrelated topics, you often respond by saying you don’t know.
 
-You commonly use words like "nah" to express disagreement or "nope" instead of saying "not really."
 """
     ]
     return " ".join(personality_traits)
@@ -298,9 +243,9 @@ def chat_with_ai(user_input, user_id):
     completion = client.chat.completions.create(
         model="llama3-8b-8192",
         messages=messages,
-        temperature=1.0,  # Adjusted to reduce unnecessary creativity
-        max_tokens=2048,
-        top_p=0.85,
+        temperature=0.8,  # ✅ Vừa sáng tạo nhưng không quá ngẫu nhiên
+        max_tokens=100,  # ✅ Giữ câu trả lời đủ dài nhưng không lan man
+        top_p=0.9,  # ✅ Tăng tính đa dạng của câu trả lời
         stream=True,
     )
 
@@ -321,6 +266,44 @@ def chat_with_ai(user_input, user_id):
 
 # --- TELEGRAM BOT ---
 telegram_client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+#TYPING AND MARK AS READ
+
+async def mark_messages_as_read(client, channel_id, topic_id, messages):
+    """Đánh dấu tin nhắn là đã đọc."""
+    try:
+        input_channel = await client.get_input_entity(channel_id)
+        latest_message_id = max(msg.get("message_id", 0) for msg in messages)
+        
+        if topic_id:
+            result = await client(functions.messages.ReadHistoryRequest(
+                peer=input_channel,
+                max_id=latest_message_id,
+                topic_id=topic_id
+            ))
+        else:
+            result = await client(functions.channels.ReadHistoryRequest(
+                channel=input_channel,
+                max_id=latest_message_id
+            ))
+        
+        if result:
+            print(f"✅ Đã đánh dấu tin nhắn đến ID {latest_message_id} trong topic {topic_id} của kênh {channel_id}.")
+        else:
+            print(f"⚠️ Không thể đánh dấu tin nhắn đã đọc trong topic {topic_id} của kênh {channel_id}.")
+    except Exception as e:
+        print(f"❌ Lỗi khi đánh dấu tin nhắn đã đọc trong topic {topic_id}: {e}")
+
+async def show_typing_action(client, channel_id, duration=3):
+    """Hiển thị hiệu ứng 'typing' khi bot đang phản hồi."""
+    try:
+        for _ in range(duration):
+            await client(functions.messages.SetTypingRequest(
+                peer=channel_id,
+                action=types.SendMessageTypingAction()
+            ))
+            await asyncio.sleep(1)
+    except Exception as e:
+        print(f"❌ Lỗi khi hiển thị trạng thái 'typing': {e}")
 
 @telegram_client.on(events.NewMessage)
 async def handle_new_message(event):
@@ -328,34 +311,83 @@ async def handle_new_message(event):
     user_id = event.sender_id
     message_text = event.text
     message_id = event.id
-    # Chỉ xử lý tin nhắn từ kênh được phép
-    if chat_id not in CHANNEL_WHITELIST:
+
+    blacklist_user_ids = {7250791699, 5046314546, 609517172}
+    if user_id in blacklist_user_ids:
         return
+    # 🛑 Kiểm tra xem kênh có được phép không
+    if chat_id not in channel_settings:
+        return
+    
+    messages = [{"message_id": message_id}]
+    await mark_messages_as_read(telegram_client, chat_id, None, messages)
+    # Lấy allowed_thread_id từ channel_settings
+    allowed_thread_id = channel_settings.get(chat_id, None)
 
-    # --- CẬP NHẬT MỚI: Lưu tin nhắn vào database và reset bộ đếm ---
+    # Xác định Topic ID từ tin nhắn
+    try:
+        topic_id = None
+
+        # Trường hợp 1: Không có reply_to => Đây là nhóm chính (general chat)
+        if not hasattr(event.message, "reply_to") or event.message.reply_to is None:
+            topic_id = None
+
+        # Trường hợp 2: Tin nhắn đến từ một topic (có forum_topic=True)
+        elif getattr(event.message.reply_to, "forum_topic", False):
+            # Nếu có reply_to_top_id thì đây là topic ID
+            if getattr(event.message.reply_to, "reply_to_top_id", None) is not None:
+                topic_id = event.message.reply_to.reply_to_top_id
+            else:
+                # Nếu không có reply_to_top_id, dùng reply_to_msg_id làm topic ID
+                topic_id = event.message.reply_to.reply_to_msg_id
+
+        # Trường hợp 3: Tin nhắn có reply_to nhưng không phải topic => Nhóm chính
+        else:
+            topic_id = None
+
+        # 🛑 Bộ lọc topic: Chỉ phản hồi nếu tin nhắn thuộc topic/kênh cho phép
+        if allowed_thread_id is None and topic_id is not None:
+            print(f"Ignoring message from Topic ID: {topic_id}, chỉ phản hồi trong nhóm chính.")
+            return
+
+        if allowed_thread_id is not None and topic_id != allowed_thread_id:
+            print(f"Ignoring message from Topic ID: {topic_id}, chỉ phản hồi trong Topic ID: {allowed_thread_id}.")
+            return
+
+    except Exception as e:
+        print(f"Error processing message topic: {e}")
+        return
+    print("📩 Nhận được tin nhắn mới")
+
+    # --- Lưu tin nhắn vào database và reset bộ đếm chủ đề ---
     db.add_message(message_id, chat_id, user_id, message_text)
-    # Reset bộ đếm chủ đề khi có tin nhắn mới
-    # time_manager.reset_topic_timer()
+    time_manager.reset_topic_timer()
 
-    # --- Logic cũ cho admin ---
+    # --- Xử lý admin nhập lệnh ---
     if user_id == ADMIN_USER_ID and message_text.startswith("/teach"):
         instruction = message_text.replace("/teach", "", 1).strip()
         update_faiss_memory(index_shared, metadata_shared, instruction, "system", user_id=user_id, is_shared=True)
-        await event.reply("Quy tắc đã được lưu vào bộ nhớ chung.")
+        await event.reply("✅ Quy tắc đã được lưu vào bộ nhớ chung.")
         return
 
-    # --- Xử lý mới: Kiểm tra trạng thái online ---
+    # --- Nếu Henry đang online, gom tin nhắn trước khi kiểm tra độ quan trọng ---
     if time_manager.is_online:
-        # Xử lý tin nhắn bình thường (giữ nguyên logic cũ)
-        response = chat_with_ai(message_text, user_id)
-        db.mark_as_processed(message_id)
-        time_manager.extend_online_time(120)
-        await event.reply(response)
-        
-    else:
-        # Tin nhắn được lưu nhưng Henry không phản hồi ngay
-        pass
+        # Kiểm tra trước xem tin nhắn có quan trọng không
+        is_important = await message_filter.should_respond(event, event.text)
 
+        if is_important:
+            # Chỉ hiển thị trạng thái typing nếu tin nhắn quan trọng
+            await show_typing_action(telegram_client, chat_id, duration=3)
+        
+        # Gọi xử lý tin nhắn
+        await message_filter.collect_messages_and_respond(event, chat_with_ai, telegram_client, db)
+        
+        # Nếu tin nhắn quan trọng, đánh dấu đã xử lý và gia hạn thời gian online
+        if is_important:
+            db.mark_as_processed(message_id)
+            time_manager.extend_online_time(120)
+    else:
+        print("⏳ Henry đang offline, tin nhắn được lưu nhưng không phản hồi ngay.")
 
 async def send_random_topic(group_id):
     # Sinh chủ đề mới và kiểm tra trùng lặp
@@ -366,40 +398,79 @@ async def send_random_topic(group_id):
             topic_generator.save_topic(topic)
             await telegram_client.send_message(group_id, topic)
             return
-async def process_offline_messages():
+async def process_offline_messages(group_id, offline_messages):
+    """
+    Xử lý tin nhắn offline ngay khi Henry online.
+    """
+    print(f"[DEBUG] 🔄 Bắt đầu xử lý tin nhắn offline trong nhóm {group_id}...")
+    
+    for msg in offline_messages:
+        user_id, content, msg_id, timestamp = msg
+        db.mark_as_processed(msg_id)
+        print(f"[DEBUG] 📩 Kiểm tra tin nhắn từ User {user_id}: {content}")
+
+        # Kiểm tra xem tin nhắn có quan trọng hay không
+        if classify_message(content):
+            print(f"[INFO] ✅ Tin nhắn từ {user_id} được xác định là quan trọng: {content}")
+            response = chat_with_ai(content, user_id)
+            await telegram_client.send_message(group_id, response, reply_to=msg_id)
+            print(f"[INFO] ✅ Đã trả lời tin nhắn {msg_id} và đánh dấu đã xử lý.")
+        else:
+            print(f"[INFO] ❌ Tin nhắn từ {user_id} KHÔNG được xác định là quan trọng: {content}")
+async def auto_generate_topic(group_id):
     while True:
+        await asyncio.sleep(30)
         if time_manager.is_online:          
-            if time_manager.check_offline_duration():
-                print("[DEBUG] Bot đã offline đủ lâu, bắt đầu xử lý tin nhắn offline...")
+             if time_manager.check_offline_duration():
+                await send_random_topic(group_id)
+                time_manager.reset_topic_timer()
+                print(f"[INFO] 📝 Đã gửi chủ đề mới vào nhóm {group_id}.")
+        else:
+            print(f"[INFO] ✅ Không cần sinh chủ đề vào lúc này.")
 
-                for group_id in CHANNEL_WHITELIST.keys():
-                    last_online = time_manager.last_activity_time
-                    offline_messages = db.get_offline_messages(group_id, last_online)
+async def monitor_henry_online():
+    """
+    Kiểm tra trạng thái online của Henry và gọi process_offline_messages khi Henry chuyển từ offline sang online.
+    """
+    previous_status = time_manager.is_online  # Lưu trạng thái trước đó
 
-                    if not offline_messages:
-                        print(f"[DEBUG] Không có tin nhắn offline trong nhóm {group_id}. Gửi chủ đề tự động...")
-                        await send_random_topic(group_id)
-                    else:
-                        for msg in offline_messages:
-                            user_id, content, msg_id, timestamp = msg
-                            db.mark_as_processed(msg_id)
-                            print(f"[DEBUG] Kiểm tra tin nhắn từ User {user_id}: {content}")
+    while True:
+        await asyncio.sleep(1)  # Kiểm tra mỗi giây
 
-                            # Kiểm tra xem tin nhắn có phải là tin nhắn quan trọng hay không
-                            if classify_message(content):
-                                print(f"[INFO] ✅ Tin nhắn từ {user_id} được xác định là quan trọng: {content}")
-                                response = chat_with_ai(content, user_id)
-                                await telegram_client.send_message(group_id, response, reply_to=msg_id)
-                                print(f"[INFO] ✅ Đã trả lời và đánh dấu tin nhắn {msg_id} là đã xử lý.")
-                                break
-                            else:
-                                print(f"[INFO] ❌ Tin nhắn từ {user_id} KHÔNG được xác định là quan trọng: {content}")
+        # Nếu Henry chuyển từ offline sang online
+        if not previous_status and time_manager.is_online:
+            print("[Monitor] 🟢 Henry vừa chuyển sang online, xử lý tin nhắn offline...")
+
+            # ✅ Lấy tin nhắn offline từ database
+            offline_messages = db.get_offline_messages(GROUP_ID, time_manager.last_activity_time)
+
+            # ✅ Chỉ gọi process_offline_messages nếu có tin nhắn offline
+            if offline_messages:
+                asyncio.create_task(process_offline_messages(GROUP_ID, offline_messages))
+            else:
+                print("[Monitor] ✅ Không có tin nhắn offline cần xử lý.")
+
+        # Cập nhật trạng thái Henry
+        previous_status = time_manager.is_online
 
 # --- RUN TELEGRAM CLIENT ---
 async def main():
     print("Bot đang chạy...")
-    time_manager.start_cycle()  # Khởi động chu kỳ online/offline
-    asyncio.create_task(process_offline_messages())  # Chạy xử lý offline
+
+    # ✅ Lấy group_id duy nhất từ channel_settings
+    global GROUP_ID
+    GROUP_ID = list(channel_settings.keys())[0]  # ✅ Henry chỉ hoạt động trong nhóm đầu tiên
+
+    # ✅ Khởi động chu kỳ online/offline
+    time_manager.start_cycle()
+
+    # ✅ Chạy auto_generate_topic chỉ cho nhóm này
+    asyncio.create_task(auto_generate_topic(GROUP_ID))
+
+    # ✅ Theo dõi trạng thái online của Henry để gọi process_offline_messages()
+    asyncio.create_task(monitor_henry_online())
+
+    # ✅ Chạy Telegram bot
     async with telegram_client:
         await telegram_client.run_until_disconnected()
 
