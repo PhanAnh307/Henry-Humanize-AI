@@ -3,7 +3,11 @@ import re
 import json
 from datetime import datetime, timedelta
 from groq import Groq
-
+from PIL import Image
+import pytesseract
+import os
+from paddleocr import PaddleOCR
+import cv2
 class MessageFilter:
     def __init__(self):
         self.bot_user_id = 6781434030  # 🔹 Ghi trực tiếp User ID của bot
@@ -85,13 +89,13 @@ class MessageFilter:
             return False
 
 
-    async def collect_messages_and_respond(self, event, chat_with_ai, telegram_client, db):
+    async def collect_messages_and_respond(self, event, chat_with_ai, telegram_client, db, processed_text=None):
         """
         Collect messages for 5 seconds before deciding whether to respond.
         """
         user_id = event.sender_id
         chat_id = event.chat_id
-        message_text = event.text.strip()
+        message_text = processed_text if processed_text is not None else event.text.strip()
         message_id = event.id  # Lấy ID của tin nhắn
 
         print(f"[DEBUG] 📩 Nhận tin nhắn mới từ User {user_id}: {message_text}")
@@ -128,3 +132,62 @@ class MessageFilter:
         
         # Xóa tin nhắn đã xử lý khỏi bộ nhớ đệm
         self.last_messages[user_id] = []
+ocr = PaddleOCR(use_angle_cls=True, lang='en')  # PaddleOCR hỗ trợ tốt hơn
+
+def preprocess_image(image_path):
+    """Tiền xử lý ảnh để tăng độ chính xác của OCR"""
+    if not isinstance(image_path, str) or not os.path.exists(image_path):
+        raise ValueError(f"[ERROR] Không thể tải ảnh: {image_path}")
+    
+    image = cv2.imread(image_path)
+    if image is None:
+        raise ValueError(f"Không thể đọc ảnh từ đường dẫn: {image_path}")
+    
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Chuyển sang grayscale
+    
+    # Tăng độ tương phản bằng adaptive threshold
+    processed = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    
+    return processed
+
+def extract_text_from_image(image_path):
+    """Trích xuất văn bản từ ảnh bằng cả Tesseract OCR và PaddleOCR"""
+    try:
+        processed_image = preprocess_image(image_path)
+        
+        # OCR bằng Tesseract
+        text_tesseract = pytesseract.image_to_string(processed_image, lang='eng', config='--psm 6')
+        
+        # OCR bằng PaddleOCR
+        result = ocr.ocr(image_path, cls=True)
+        text_paddle = " ".join([line[1][0] for line in result[0] if line[1][1] > 0.5])
+        
+        # Kết hợp kết quả của cả hai OCR
+        final_text = text_paddle if text_paddle else text_tesseract
+        
+        print(f"[OCR] Extracted Text: {final_text}")
+        return final_text.strip()
+    except Exception as e:
+        print(f"[OCR] Lỗi khi trích xuất văn bản: {e}")
+        return ""
+
+async def extract_text_from_message(client, event):
+    """Trích xuất văn bản từ ảnh trong tin nhắn và gộp với nội dung văn bản nếu có."""
+    text_from_image = ""
+    text_from_message = event.text.strip() if event.text else ""
+    
+    if event.photo:
+        try:
+            image_path = await client.download_media(event.photo)  # Thêm `await`
+            if not isinstance(image_path, str) or not os.path.exists(image_path):
+                raise ValueError(f"[ERROR] Không thể tải ảnh: {image_path}")
+            
+            text_from_image = extract_text_from_image(image_path)
+            os.remove(image_path)  # Xóa ảnh sau khi xử lý
+            print(f"[OCR] Đã xóa ảnh sau khi xử lý: {image_path}")
+        except Exception as e:
+            print(f"[ERROR] Lỗi khi xử lý ảnh: {e}")
+    
+    # Gộp nội dung ảnh + văn bản tin nhắn
+    final_text = f"{text_from_image} {text_from_message}".strip()
+    return final_text if final_text else None

@@ -19,7 +19,7 @@ class TimeManager:
         self.status_thread.start()
 
     def start_cycle(self):
-        self.switch_offline()
+        self.switch_online()
     def switch_online(self):
         """Chuyển Henry sang trạng thái online."""
         self.is_online = True

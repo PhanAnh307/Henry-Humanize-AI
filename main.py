@@ -14,7 +14,7 @@ import sys
 from time_manager import TimeManager  # Import TimeManager
 from database import Database  # Import Database
 from topic_generator import TopicGenerator
-from message_filter import MessageFilter  # Đảm bảo đã import MessageFilter
+from message_filter import MessageFilter, extract_text_from_message  # Đảm bảo đã import MessageFilter
 from telethon import functions, types
 
 # 🔹 Khởi tạo một instance của MessageFilter
@@ -309,18 +309,20 @@ async def show_typing_action(client, channel_id, duration=3):
 async def handle_new_message(event):
     chat_id = event.chat_id
     user_id = event.sender_id
-    message_text = event.text
+    message_text = event.text  # Lấy nội dung văn bản nếu có
     message_id = event.id
 
     blacklist_user_ids = {7250791699, 5046314546, 609517172}
     if user_id in blacklist_user_ids:
         return
+
     # 🛑 Kiểm tra xem kênh có được phép không
     if chat_id not in channel_settings:
         return
     
     messages = [{"message_id": message_id}]
     await mark_messages_as_read(telegram_client, chat_id, None, messages)
+
     # Lấy allowed_thread_id từ channel_settings
     allowed_thread_id = channel_settings.get(chat_id, None)
 
@@ -357,37 +359,37 @@ async def handle_new_message(event):
     except Exception as e:
         print(f"Error processing message topic: {e}")
         return
+
     print("📩 Nhận được tin nhắn mới")
 
-    # --- Lưu tin nhắn vào database và reset bộ đếm chủ đề ---
-    db.add_message(message_id, chat_id, user_id, message_text)
-    time_manager.reset_topic_timer()
+    # 🔄 **Gộp nội dung ảnh với văn bản gốc nếu có cả hai**
+    final_message_content = await extract_text_from_message(telegram_client, event)
 
-    # --- Xử lý admin nhập lệnh ---
-    if user_id == ADMIN_USER_ID and message_text.startswith("/teach"):
-        instruction = message_text.replace("/teach", "", 1).strip()
-        update_faiss_memory(index_shared, metadata_shared, instruction, "system", user_id=user_id, is_shared=True)
-        await event.reply("✅ Quy tắc đã được lưu vào bộ nhớ chung.")
+    # 🛑 Nếu `final_message_content` rỗng, bỏ qua tin nhắn
+    if not final_message_content:
+        print("🚫 Ignored empty message after processing image (no text extracted).")
         return
 
-    # --- Nếu Henry đang online, gom tin nhắn trước khi kiểm tra độ quan trọng ---
-    if time_manager.is_online:
-        # Kiểm tra trước xem tin nhắn có quan trọng không
-        is_important = await message_filter.should_respond(event, event.text)
+    # --- Lưu tin nhắn vào database và reset bộ đếm chủ đề ---
+    db.add_message(message_id, chat_id, user_id, final_message_content)
+    time_manager.reset_topic_timer()
 
-        if is_important:
-            # Chỉ hiển thị trạng thái typing nếu tin nhắn quan trọng
-            await show_typing_action(telegram_client, chat_id, duration=3)
+    # --- Nếu Henry đang online, gom tin nhắn trước khi kiểm tra độ quan trọng ---
+    is_important = await message_filter.should_respond(event, final_message_content)  # 🔥 Kiểm tra độ quan trọng SAU khi trích xuất ảnh
+
+    if time_manager.is_online and is_important:
+        # Chỉ hiển thị trạng thái typing nếu tin nhắn quan trọng
+        await show_typing_action(telegram_client, chat_id, duration=3)
         
         # Gọi xử lý tin nhắn
-        await message_filter.collect_messages_and_respond(event, chat_with_ai, telegram_client, db)
+        await message_filter.collect_messages_and_respond(event, chat_with_ai, telegram_client, db, processed_text=final_message_content)
         
         # Nếu tin nhắn quan trọng, đánh dấu đã xử lý và gia hạn thời gian online
-        if is_important:
-            db.mark_as_processed(message_id)
-            time_manager.extend_online_time(120)
+        db.mark_as_processed(message_id)
+        time_manager.extend_online_time(120)
+
     else:
-        print("⏳ Henry đang offline, tin nhắn được lưu nhưng không phản hồi ngay.")
+        print("⏳ Henry đang offline hoặc tin nhắn không quan trọng, không phản hồi ngay.")
 
 async def send_random_topic(group_id):
     # Sinh chủ đề mới và kiểm tra trùng lặp
